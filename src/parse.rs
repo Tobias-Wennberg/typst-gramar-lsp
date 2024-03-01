@@ -1,44 +1,33 @@
-use std::{char, ops::Index, u32, usize};
-
+use std::{char, usize};
 use dashmap::DashMap;
-use im_rc::HashMap;
 use tower_lsp::{lsp_types::{Position, TextDocumentItem, Url}, Client};
-use ropey::Rope;
-
+use typst_syntax::Source;
 
 pub struct Backend {
     pub client: Client,
-    pub document_map: DashMap<String, Document>,
+    pub document_map: DashMap<Url, Document>,
 }
 pub struct Document {
-    pub body_rope: Rope,
-    pub text_document_item: TextDocumentItem,
+    pub typst_source: Source,
+    pub text_chunks: Vec<std::ops::Range<usize>>
+}
+pub struct Diagnostic {
+    pub position :Position,
 }
 
 impl Backend {
-    pub fn create_document(&self, doc :&TextDocumentItem) {
-        let rope = ropey::Rope::from_str(&doc.text);
-        self.document_map.insert(doc.uri.to_string(), Document {
-            body_rope: rope,
-            text_document_item: doc.clone(),
-        });
+    pub fn create_document(&self, uri :&Url, text :&String) {
+        self.document_map.insert(uri.clone(), Document::new(text));
     }
 
-    pub fn on_change(&self, working_doc :&Document, doc_changes: &TextDocumentItem) {
-        let rope = ropey::Rope::from_str(&doc_changes.text);
-        self.document_map.insert(doc_changes.uri.to_string(), Document {
-            body_rope: rope,
-            text_document_item: doc_changes.clone(),
-        });
-    }
 }
 // Finds and returns the word a position pos. If none is found, None is returned
-pub fn find_word_str(doc :String, pos :Position) -> Option<String> {
+pub fn find_word(doc :String, pos :Position) -> Option<String> {
     let char_num :usize = match pos.character.try_into() {
         Ok(c) => {c},
         Err(_) => {return None},
     };
-    let line = match find_line_str( doc, pos) {
+    let line = match find_line( doc, pos) {
         Some(c) => {c},
         None => {"".to_string()},
     }.to_string();
@@ -76,7 +65,7 @@ pub fn find_word_str(doc :String, pos :Position) -> Option<String> {
     }
     return Some(word);
 }
-fn find_line_str(doc :String, pos :Position) -> Option<String> {
+fn find_line(doc :String, pos :Position) -> Option<String> {
     let line_num :usize = match pos.line.try_into() {
         Ok(c) => {c},
         Err(_) => {return None},
@@ -88,29 +77,44 @@ fn find_line_str(doc :String, pos :Position) -> Option<String> {
     }.to_string();
     return Some(line);
 }
-/*
-pub fn find_word_rope(doc :Rope, pos :Position) -> Option<String> {
-    let line_num = pos.line.try_into().unwrap();
-    let char_num = pos.line.try_into().unwrap();
-    if line_num > doc.len_lines() {
-        return None;
-    }
-    let mut start = 0;
-    let mut end = 0;
-    let line_text = doc.line(line_num);
-    line_text.
-    while start > 0 && !line_text.is_char_boundary(start - 1) {
-        start -= 1;
-    }
+pub async fn mark_text(uri :Url, working_doc :&Document, client :&Client) {
+    let mut diagnostics :Vec<tower_lsp::lsp_types::Diagnostic> = vec![];
+    for a in &working_doc.text_chunks {
+        let b = working_doc.typst_source.get(a.clone()).unwrap();
+        let (line1, character1) = working_doc.range_to_line_character(a.start).unwrap();
+        let (line2, character2) = working_doc.range_to_line_character(a.end).unwrap();
+        let r = tower_lsp::lsp_types::Range {
+            start: Position {
+                line: line1 as u32,
+                character: character1 as u32,
+            },
+            end: Position {
+                line: line2 as u32,
+                character: character2 as u32,
+            }
+        };
 
-    // Find the end of the word
-    while end < line_text.len_chars() && !line_text.is_char_boundary(end) {
-        end += 1;
+        //let message = format!("startLine: {}, startChar: {} | endLine: {}, endChar: {} ", c.range.start.line, c.range.start.character, c.range.end.line, c.range.end.character);
+        let message = format!("startLine: {}, startChar: {} | endLine: {}, endChar: {} | content: \"{}\"", 
+                              r.start.line, 
+                              r.start.character, 
+                              r.end.line, 
+                              r.end.character, 
+                              b
+                              );
+        diagnostics.push(
+            tower_lsp::lsp_types::Diagnostic {
+                range: r,
+                severity: None,
+                code: None,
+                code_description: None,
+                source: None,
+                message: message,
+                related_information: None,
+                tags: None,
+                data: None
+            }
+            );
     }
-
-    // Extract the word from the Rope
-    let word = line_text.slice(start..end).to_string();
-    return None;
-
+    client.publish_diagnostics(uri, diagnostics, None).await;
 }
-*/

@@ -1,16 +1,16 @@
+mod language_tool;
+mod typst_parse;
 mod word_query;
 mod semantic_token;
 mod parse;
-use std::collections::HashMap;
 use std::ops::Deref;
 use dashmap::DashMap;
-use ropey::Rope;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp::{LanguageServer, LspService, Server};
 use semantic_token::LEGEND_TYPE;
 use std::process::Command;
-use parse::Backend;
+use parse::{mark_text, Backend};
 use lazy_static::lazy_static;
 
 lazy_static! {
@@ -20,7 +20,7 @@ lazy_static! {
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult>{
+    async fn initialize(&self, _params: InitializeParams) -> Result<InitializeResult>{
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "Typst grammar lsp".to_string(),
@@ -135,7 +135,7 @@ impl LanguageServer for Backend {
         Ok(())
     }
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.create_document(&params.text_document);
+        self.create_document(&params.text_document.uri, &params.text_document.text);
         self.client
             .log_message(MessageType::INFO, "file opened!")
             .await;
@@ -145,19 +145,13 @@ impl LanguageServer for Backend {
             Some(c) => {c},
             None => {
                 self.client
-                    .log_message(MessageType::ERROR, "file saved no text!")
+                    .log_message(MessageType::INFO, "file saved no text!")
                     .await;
                 return;
             }
         };
         let uri = params.text_document.uri;
-        let mut working_doc_ref = self.document_map.get_mut(
-            &uri.to_string()
-        ).unwrap();
-        working_doc_ref.text_document_item.text = text;
-        self.client
-            .log_message(MessageType::INFO, format!("file saved with text {}!", working_doc_ref.text_document_item.text))
-            .await;
+        self.create_document(&uri, &text)
     }
     async fn did_close(&self, _: DidCloseTextDocumentParams) {
         self.client
@@ -165,16 +159,29 @@ impl LanguageServer for Backend {
             .await;
     }
     async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
+        let uri = params.text_document.uri;
+
+        /*
+        let gramar = language_tool::check_text(&params.content_changes[0].text).await;
+        self.client.publish_diagnostics(
+            uri.clone(),
+            gramar.diagnostic,
+            None,
+        .await;
+        */
         self.client.log_message(MessageType::INFO, format!("did change: content \n{}",params.content_changes[0].text)).await;
-        self.create_document(&TextDocumentItem {
-            uri: params.text_document.uri,
-            text: std::mem::take(&mut params.content_changes[0].text),
-            version: params.text_document.version,
-            language_id: "typst".to_string(),
-        });
+        self.create_document(&uri, &params.content_changes[0].text);
+        let working_doc_ref = match __self.document_map.get(&uri) {
+            Some(c) => {c},
+            None => {return},
+        };
+        let working_doc :&parse::Document = working_doc_ref.deref();
+        mark_text(uri, working_doc, &self.client).await;
 
     }
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        Ok(None)
+        /*
         let uri = params.text_document_position_params.text_document.uri.to_string();
         let working_doc_ref = match __self.document_map.get(&uri) {
             Some(c) => {c},
@@ -189,7 +196,7 @@ impl LanguageServer for Backend {
             },
         };
         let working_doc = working_doc_ref.deref();
-        let word = match parse::find_word_str(
+        let word = match parse::find_word(
             working_doc.text_document_item.text.to_string(),
             params.text_document_position_params.position
         ) {
@@ -227,9 +234,12 @@ impl LanguageServer for Backend {
                 value: output_string.to_string(),
             }),
             range: None
-        }))   
+        }))
+        */
     }
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        Ok(None)
+        /*
         self.client
             .log_message(MessageType::INFO, format!("Completion!"))
             .await;
@@ -243,7 +253,7 @@ impl LanguageServer for Backend {
         let working_doc = working_doc_ref.deref();
         let mut pos = params.text_document_position.position;
         pos.character-=1;
-        let word = match parse::find_word_str(
+        let word = match parse::find_word(
             working_doc.text_document_item.text.to_string(),
             pos
         ) {
@@ -282,32 +292,7 @@ impl LanguageServer for Backend {
             )
         }
         return Ok(Some(CompletionResponse::Array(com_resp))) 
-    }
-    async fn completion_resolve(&self, params: CompletionItem) -> Result<CompletionItem> {
-        self.client.log_message(MessageType::INFO, "Completion resolve!").await;
-        return Ok(
-                CompletionItem {
-                    label: "hello".to_string().clone(),
-                    label_details: None,
-                    kind: Some(CompletionItemKind::VARIABLE),
-                    detail: Some("hello".to_string().clone()),
-                    documentation: Some(Documentation::String("Some documentation".to_string())),
-                    deprecated: Some(false),
-                    preselect: None,
-                    sort_text: None,
-                    filter_text: None,
-                    insert_text: Some("hello".to_string().clone()),
-                    insert_text_format: None,
-                    insert_text_mode: Some(InsertTextMode::AS_IS),
-                    text_edit: None,
-                    additional_text_edits: None,
-                    command: None,
-                    commit_characters: None,
-                    data: None,
-                    tags: None,
-                }
-        );
-
+        */
     }
 }
 
