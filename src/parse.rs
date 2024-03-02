@@ -2,6 +2,7 @@ use std::{char, usize};
 use dashmap::DashMap;
 use tower_lsp::{lsp_types::{Position, TextDocumentItem, Url}, Client};
 use typst_syntax::Source;
+use std::ops::Range;
 
 pub struct Backend {
     pub client: Client,
@@ -9,10 +10,16 @@ pub struct Backend {
 }
 pub struct Document {
     pub typst_source: Source,
-    pub text_chunks: Vec<std::ops::Range<usize>>
+    pub text_chunks: Vec<Range<usize>>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub diagnostics_lsp: Vec<tower_lsp::lsp_types::Diagnostic>,
 }
 pub struct Diagnostic {
-    pub position :Position,
+    pub range :Range<usize>,
+    pub source :DiagnosticSource,
+}
+pub enum DiagnosticSource {
+    LanguageTool(crate::language_tool::LTDiagnostic)
 }
 
 impl Backend {
@@ -77,7 +84,7 @@ fn find_line(doc :String, pos :Position) -> Option<String> {
     }.to_string();
     return Some(line);
 }
-pub async fn mark_text(uri :Url, working_doc :&Document, client :&Client) {
+pub async fn mark_text(uri :&Url, working_doc :&Document, client :&Client) {
     let mut diagnostics :Vec<tower_lsp::lsp_types::Diagnostic> = vec![];
     for a in &working_doc.text_chunks {
         let b = working_doc.typst_source.get(a.clone()).unwrap();
@@ -109,12 +116,12 @@ pub async fn mark_text(uri :Url, working_doc :&Document, client :&Client) {
                 code: None,
                 code_description: None,
                 source: None,
-                message: message,
+                message,
                 related_information: None,
                 tags: None,
                 data: None
             }
             );
     }
-    client.publish_diagnostics(uri, diagnostics, None).await;
+    client.publish_diagnostics(uri.clone(), diagnostics, None).await;
 }

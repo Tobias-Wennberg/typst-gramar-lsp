@@ -1,4 +1,5 @@
 use substring::Substring;
+use tower_lsp::lsp_types::request::ShowDocument;
 use tower_lsp::lsp_types::Position;
 use typst_syntax::{SyntaxKind, SyntaxNode};
 use typst_syntax::Source;
@@ -14,6 +15,8 @@ impl Document {
         Document {
             typst_source,
             text_chunks: clean_ranges,
+            diagnostics_lsp: vec!{},
+            diagnostics: vec!{},
         }
     }
     //Return (line, character) or none if outside of source
@@ -28,7 +31,34 @@ impl Document {
         };
         Some((l,c))
     }
-    pub fn get_chunk(&self, pos :&tower_lsp::lsp_types::Position) -> Option<String> {
+    pub fn byte_range_to_lsp_range(&self, range :&Range<usize>) -> Option<tower_lsp::lsp_types::Range> {
+        Some(
+            tower_lsp::lsp_types::Range {
+                start: tower_lsp::lsp_types::Position {
+                    line: match self.typst_source.byte_to_line(range.start) {
+                        Some(c) => {c as u32},
+                        None => return None,
+                    },
+                    character: match self.typst_source.byte_to_line(range.start) {
+                        Some(c) => {c as u32},
+                        None => return None,
+                    },
+                },
+                end: tower_lsp::lsp_types::Position {
+                    line: match self.typst_source.byte_to_line(range.end) {
+                        Some(c) => {c as u32},
+                        None => return None,
+                    },
+                    character: match self.typst_source.byte_to_line(range.end) {
+                        Some(c) => {c as u32},
+                        None => return None,
+                    },
+                }
+            }
+        )
+
+    }
+    pub fn get_chunk_at_pos(&self, pos :&tower_lsp::lsp_types::Position) -> Option<String> {
         let byte_index = match self.typst_source.line_column_to_byte(pos.line as usize, pos.character as usize) {
             Some(c) => c,
             None => return None,
@@ -42,7 +72,12 @@ impl Document {
             Some(c) => Some(c.to_string()),
             None => None
         }
-
+    }
+    pub fn get_chunk_by_range(&self, range :Range<usize>) -> Option<String> {
+        match self.typst_source.get(range) {
+            Some(c) => Some(c.to_string()),
+            None => None
+        }
     }
     fn chunk_by_byte_index(&self, byte_index :usize) -> Option<Range<usize>> {
         for r in &self.text_chunks {

@@ -9,7 +9,6 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService, Server};
 use semantic_token::LEGEND_TYPE;
-use std::process::Command;
 use parse::{mark_text, Backend};
 use lazy_static::lazy_static;
 
@@ -158,7 +157,7 @@ impl LanguageServer for Backend {
             .log_message(MessageType::INFO, "file closed!")
             .await;
     }
-    async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
 
         /*
@@ -169,14 +168,19 @@ impl LanguageServer for Backend {
             None,
         .await;
         */
-        self.client.log_message(MessageType::INFO, format!("did change: content \n{}",params.content_changes[0].text)).await;
         self.create_document(&uri, &params.content_changes[0].text);
         let working_doc_ref = match __self.document_map.get(&uri) {
             Some(c) => {c},
             None => {return},
         };
         let working_doc :&parse::Document = working_doc_ref.deref();
-        mark_text(uri, working_doc, &self.client).await;
+        mark_text(&uri, &working_doc, &self.client).await;
+        let lt_gramar = language_tool::run_diagnostic(working_doc, &working_doc.text_chunks).await.unwrap();
+        self.client.publish_diagnostics(
+            uri.clone(),
+            lt_gramar.1,
+            None,
+        ).await;
 
     }
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
