@@ -1,12 +1,8 @@
-
-/* Most of this code is copied from https://github.com/antonWetzel/typst-languagetool.git
- * with small modifications
-*/
-
-
 use serde::{Deserialize, Serialize};
 use tower_lsp::lsp_types::{Position, Range};
-use crate::parse::{self, Diagnostic};
+use std::str::Chars;
+use crate::components::{self, Diagnostic};
+use crate::components::language_tool::LTDiagnostic;
 use std::{
     collections::HashMap, 
     error::Error, 
@@ -24,29 +20,16 @@ use languagetool_rust::{
     server::ServerClient,
     CheckResponse
 };
-use typst_syntax::{SyntaxKind, SyntaxNode};
-use crate::language_tool::LTDiagnostic;
+use crate::parse;
+use typst_syntax::SyntaxNode;
+use typst_syntax::SyntaxKind;
 
-pub struct TextCheck {
-    pub diagnostic: Vec<Diagnostic>,
-    pub matches: Vec<MatchChunk>,
-
-}
-pub struct MatchChunk {
-    matches: Vec<Match>,
-    language_code: String
-}
-pub struct Match {
-    match_data: languagetool_rust::check::Match,
-    range: Range
-}
-
-use std::str::Chars;
-pub async fn check_text(
+pub async fn check(
     document :&parse::Document,
-    typst_text :&String) -> (Vec<Diagnostic>, Vec<tower_lsp::lsp_types::Diagnostic>) {
+    ) -> (Vec<Diagnostic>, Vec<tower_lsp::lsp_types::Diagnostic>) {
+    let typst_text :String = document.typst_source.text().to_string();
 	let client = ServerClient::new("http://127.0.0.1", "8081");
-    let typst_nodes = typst_syntax::parse(typst_text);
+    let typst_nodes = typst_syntax::parse(&typst_text);
     let converted_nodes = convert(&typst_nodes, &Rules::new(), 10000);
 
     let mut position :PositionLogic = PositionLogic::new(&typst_text);
@@ -95,18 +78,19 @@ fn add_chunk(
             },
         };
 
+        let towe_lsp_val = tower_lsp::lsp_types::Diagnostic {
+            range: r,
+            severity: None,
+            code: None,
+            code_description: None,
+            message: info.message.clone(),
+            related_information: None,
+            tags: None,
+            data: None,
+            source: None
+        };
         out.1.push(
-            tower_lsp::lsp_types::Diagnostic {
-                range: r,
-                severity: None,
-                code: None,
-                code_description: None,
-                message: info.message.clone(),
-                related_information: None,
-                tags: None,
-                data: None,
-                source: None
-            },
+            towe_lsp_val.clone()
         );
         let typst_range :std::ops::Range<usize> = std::ops::Range {
             start: document.typst_source.line_column_to_byte(r.start.line as usize, r.start.character as usize).unwrap(),
@@ -116,10 +100,12 @@ fn add_chunk(
         out.0.push(
             Diagnostic {
                 range: typst_range,
-                source: parse::DiagnosticSource::LanguageTool(LTDiagnostic {
+                diagnostics_lsp: towe_lsp_val.clone(),
+                source_data: components::DiagnosticSourceData::LanguageTool(LTDiagnostic {
                     replacements: info.replacements.clone(),
                     rule: info.rule.clone()
-                })
+                }),
+                source: components::DiagnosticSource::LanguageTool,
         });
 		last = info.offset;
 	}

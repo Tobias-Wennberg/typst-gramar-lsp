@@ -16,8 +16,8 @@ lazy_static! {
 }
 
 pub struct LTDiagnostic {
-    replacements: Vec<Replacement>,
-    rule: Rule,
+    pub replacements: Vec<Replacement>,
+    pub rule: Rule,
 
 }
 impl Clone for LTDiagnostic {

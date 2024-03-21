@@ -1,16 +1,17 @@
-mod language_tool;
-mod typst_parse;
+mod components;
 mod word_query;
 mod semantic_token;
 mod parse;
 use std::ops::Deref;
 use dashmap::DashMap;
+use im_rc::Vector;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService, Server};
 use semantic_token::LEGEND_TYPE;
-use parse::{mark_text, Backend};
+use parse::Backend;
 use lazy_static::lazy_static;
+use std::process::Command;
 
 lazy_static! {
     static ref WORD_LIST: Vec<String> = word_query::file_to_array("en_wordlist.txt");
@@ -101,7 +102,7 @@ impl LanguageServer for Backend {
                     document_highlight_provider: None,
                     document_symbol_provider: None,
                     workspace_symbol_provider: None,
-                    code_action_provider: None,
+                    code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                     code_lens_provider: None,
                     document_formatting_provider: None,
                     document_range_formatting_provider: None,
@@ -160,6 +161,7 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
 
+
         /*
         let gramar = language_tool::check_text(&params.content_changes[0].text).await;
         self.client.publish_diagnostics(
@@ -167,49 +169,51 @@ impl LanguageServer for Backend {
             gramar.diagnostic,
             None,
         .await;
-        */
         self.create_document(&uri, &params.content_changes[0].text);
         let working_doc_ref = match __self.document_map.get(&uri) {
             Some(c) => {c},
             None => {return},
         };
         let working_doc :&parse::Document = working_doc_ref.deref();
-        mark_text(&uri, &working_doc, &self.client).await;
+        let gramar = language_tool_old::check_text(&working_doc, &params.content_changes[0].text).await;
+        self.client.publish_diagnostics(
+            uri.clone(),
+            gramar.1,
+            None,
+        ).await;
+        return;
         let lt_gramar = language_tool::run_diagnostic(working_doc, &working_doc.text_chunks).await.unwrap();
         self.client.publish_diagnostics(
             uri.clone(),
             lt_gramar.1,
             None,
         ).await;
+        */
 
     }
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        Ok(None)
-        /*
-        let uri = params.text_document_position_params.text_document.uri.to_string();
+
+        let uri = params.text_document_position_params.text_document.uri;
         let working_doc_ref = match __self.document_map.get(&uri) {
             Some(c) => {c},
             None => {return 
                 Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::PlainText,
-                        value: "No word found".to_string(),
+                        value: "Could not find document, something is really wrong".to_string(),
                     }),
                     range: None
                 }))
             },
         };
         let working_doc = working_doc_ref.deref();
-        let word = match parse::find_word(
-            working_doc.text_document_item.text.to_string(),
-            params.text_document_position_params.position
-        ) {
+        let word = match working_doc.find_word(params.text_document_position_params.position) {
             Some(c) => {c},
             None => {return 
                 Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::PlainText,
-                        value: "No word found".to_string(),
+                        value: "Youre not cursing a word".to_string(),
                     }),
                     range: None
                 }))
@@ -228,7 +232,14 @@ impl LanguageServer for Backend {
             },
         };
         if !cmd.status.success() {
-            return Ok(None);
+            return 
+                Ok(Some(Hover {
+                    contents: HoverContents::Markup(MarkupContent {
+                        kind: MarkupKind::PlainText,
+                        value: "CMD did not execute correctly".to_string(),
+                    }),
+                    range: None
+                }))
         }
             // Convert the output bytes to a string
         let output_string = String::from_utf8_lossy(&cmd.stdout);
@@ -239,7 +250,6 @@ impl LanguageServer for Backend {
             }),
             range: None
         }))
-        */
     }
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         Ok(None)
@@ -297,6 +307,21 @@ impl LanguageServer for Backend {
         }
         return Ok(Some(CompletionResponse::Array(com_resp))) 
         */
+    }
+    async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        let uri = &params.text_document.uri;
+        let working_doc_ref = match __self.document_map.get(&uri) {
+            Some(c) => {c},
+            None => {return Ok(None)
+            },
+        };
+        let working_doc :&parse::Document = working_doc_ref.deref();
+        let x = components::code_actions(&self.client, working_doc, &params).await;
+        Ok(Some(x))
+    }
+    async fn execute_command(&self, params: ExecuteCommandParams) -> Result<Option<serde_json::Value>> {
+        crate::components::code_action_resolve(&params, &self).await;
+        Ok(None)
     }
 }
 

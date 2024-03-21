@@ -24,3 +24,5 @@ typst-syntax = { git = "https://github.com/typst/typst.git" }
 languagetool-rust = "2.1.4"
 substring = "1.4.5"
 futures = "0.3"
+uuid = {version = "1.7.0", features = ["v4", "fast-rng"]}
+maplit = "1.0"
