@@ -1,10 +1,10 @@
+mod config;
 mod components;
 mod word_query;
 mod semantic_token;
 mod parse;
 use std::ops::{Deref, DerefMut};
 use dashmap::DashMap;
-use im_rc::Vector;
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService, Server};
@@ -12,9 +12,13 @@ use semantic_token::LEGEND_TYPE;
 use parse::Backend;
 use lazy_static::lazy_static;
 use std::process::Command;
+use std::env;
+use std::path::Path;
+use std::sync::RwLock;
 
 lazy_static! {
     static ref WORD_LIST: Vec<String> = word_query::file_to_array("en_wordlist.txt");
+    static ref CONFIG: RwLock<config::RootConfig> = RwLock::new(config::RootConfig::default());
 }
 
 
@@ -231,7 +235,7 @@ impl LanguageServer for Backend {
             range: None
         }))
     }
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
         Ok(None)
         /*
         self.client
@@ -308,6 +312,11 @@ impl LanguageServer for Backend {
 #[tokio::main]
 async fn main() {
     env_logger::init();
+    let args: Vec<String> = env::args().collect();
+    let mut config = CONFIG.write().unwrap();
+    if let Some(c) = config::RootConfig::init_from_file(Path::new(&args[0])) {
+        *config = c;
+    }
 
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();

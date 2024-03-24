@@ -23,12 +23,17 @@ use languagetool_rust::{
 use crate::parse;
 use typst_syntax::SyntaxNode;
 use typst_syntax::SyntaxKind;
+use crate::CONFIG;
 
 pub async fn check(
     document :&parse::Document,
     ) -> (Vec<Diagnostic>, Vec<tower_lsp::lsp_types::Diagnostic>) {
     let typst_text :String = document.typst_source.text().to_string();
-	let client = ServerClient::new("http://127.0.0.1", "8082");
+    let client :ServerClient;
+    {
+        let config = CONFIG.read().unwrap();
+        client = ServerClient::new(&config.lt_api_hostname.clone(), &config.lt_api_port.clone());
+    }
     let typst_nodes = typst_syntax::parse(&typst_text);
     let converted_nodes = convert(&typst_nodes, &Rules::new(), 10000);
 
