@@ -1,5 +1,6 @@
 {
-	"lt_enabled": true, 
-	"lt_api_hostname": "http://127.0.0.1", 
-	"lt_api_port": "8081" 
+	"lt_enabled":true,
+	"lt_api_hostname":"http://127.0.0.1",
+	"lt_api_port":"8081",
+	"completion_enabled":true
 }

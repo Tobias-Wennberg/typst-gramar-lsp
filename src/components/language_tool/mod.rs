@@ -31,7 +31,7 @@ pub struct LTCodeActionCheckText {
     pub uri :Url,
 }
 pub struct LTCodeActionRemoveDiagnostic {
-    uri :Url,
+    pub uri :Url,
 }
 pub struct TextCheck {
     pub diagnostic: Vec<Diagnostic>,
@@ -46,11 +46,23 @@ pub struct Match {
     match_data: languagetool_rust::check::Match,
 }
 
+pub fn remove_diagnostics() {
+    crate::components::remove_lsp_diagnostics_of_type(
+        crate::components::DiagnosticSource::LanguageTool
+    );
+
+}
 pub async fn check(document :&crate::parse::Document) -> Vec<Diagnostic> {
+    if !crate::CONFIG.read().unwrap().lt_enabled {
+        return Vec::new();
+    }
     check_text::check(document).await.0
 }
 pub async fn code_action_check_text(backend :&crate::Backend, values :&LTCodeActionCheckText)
     -> Option<(Url, Vec<Diagnostic>)> {
+    if !crate::CONFIG.read().unwrap().lt_enabled {
+        return None;
+    }
     let working_doc_ref = match backend.document_map.get(&values.uri.clone()) {
         Some(c) => {c},
         None => {return None}
@@ -62,6 +74,9 @@ pub async fn code_action_check_text(backend :&crate::Backend, values :&LTCodeAct
 }
 pub async fn code_actions(client :&tower_lsp::Client, document :&crate::parse::Document, uri :Url, range :&Range<usize>) 
     -> (Vec<tower_lsp::lsp_types::CodeActionOrCommand>, Vec<(String, crate::components::CodeActionSource)> ) {
+    if !crate::CONFIG.read().unwrap().lt_enabled {
+        return (Vec::new(), Vec::new());
+    }
     let hovering_error :Vec<crate::components::Diagnostic> =  crate::components::DIAGNOSTICS
         .lock().unwrap()
         .iter()

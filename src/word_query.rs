@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::{self, BufRead};
 
-const MAX_VEC_LENGTH :usize = 10;
+const MAX_VEC_LENGTH :usize = usize::MAX;
 
 
 #[derive(Debug, PartialEq, Eq)]

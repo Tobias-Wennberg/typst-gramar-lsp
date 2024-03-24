@@ -22,7 +22,6 @@ authors: (
 doc,
 )
 
-
 = Om
 En 555 timer integrerad krets (IC) är en typisk krets för att skapa timer funktioner. Dessa kan vara förskjutningar, eller pulsgenerering. Pinouten är följande:
 + `GND`

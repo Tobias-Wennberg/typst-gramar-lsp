@@ -64,6 +64,7 @@ pub async fn code_actions(client :&tower_lsp::Client, document :&crate::parse::D
         Some(c) => {c},
         None => {return Vec::new();}
     };
+    client.log_message(tower_lsp::lsp_types::MessageType::LOG, "LT CODEACTIONS").await;
     let mut lt_actions = language_tool::code_actions(client, document, params.text_document.uri.clone(), &range).await;
     code_action_respone.append(&mut lt_actions.0);
     for l in lt_actions.1 {
@@ -95,7 +96,12 @@ pub async fn code_action_resolve(
             let working_doc = working_doc_ref.deref().to_owned();
             send_diagnostics(&backend.client, working_doc, &l.uri).await;
         },
-        CodeActionSource::LanguageToolRemoveDiagnostics(_l) => {},
+        CodeActionSource::LanguageToolRemoveDiagnostics(l) => {
+            language_tool::remove_diagnostics();
+            let working_doc_ref = backend.document_map.get(&l.uri).unwrap();
+            let working_doc = working_doc_ref.deref().to_owned();
+            send_diagnostics(&backend.client, working_doc, &l.uri).await;
+        },
     }
     backend.client.log_message(MessageType::INFO, format!("Returning")).await;
 

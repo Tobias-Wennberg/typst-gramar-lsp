@@ -39,9 +39,13 @@ impl LanguageServer for Backend {
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
                     trigger_characters: Some(vec![".".to_string()]),
-                    work_done_progress_options: Default::default(),
                     all_commit_characters: None,
-                    completion_item: None,
+                    work_done_progress_options: WorkDoneProgressOptions{
+                        work_done_progress: None,
+                    },
+                    completion_item: Some(CompletionOptionsCompletionItem {
+                        label_details_support: Some(true),
+                    }),
                 }),
                 execute_command_provider: Some(ExecuteCommandOptions {
                     commands: vec!["dummy.do_something".to_string()],
@@ -235,13 +239,16 @@ impl LanguageServer for Backend {
             range: None
         }))
     }
-    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        Ok(None)
-        /*
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        {
+            if !CONFIG.read().unwrap().completion_enabled {
+                return Ok(None);
+            }
+        }
         self.client
             .log_message(MessageType::INFO, format!("Completion!"))
             .await;
-        let uri = params.text_document_position.text_document.uri.to_string();
+        let uri = params.text_document_position.text_document.uri;
         let working_doc_ref = match __self.document_map.get(&uri) {
             Some(c) => {c},
             None => {return 
@@ -251,10 +258,7 @@ impl LanguageServer for Backend {
         let working_doc = working_doc_ref.deref();
         let mut pos = params.text_document_position.position;
         pos.character-=1;
-        let word = match parse::find_word(
-            working_doc.text_document_item.text.to_string(),
-            pos
-        ) {
+        let word = match working_doc.find_word(pos) {
             Some(c) => {c},
             None => {return Ok(None)
             },
@@ -290,9 +294,9 @@ impl LanguageServer for Backend {
             )
         }
         return Ok(Some(CompletionResponse::Array(com_resp))) 
-        */
     }
     async fn code_action(&self, params: CodeActionParams) -> Result<Option<CodeActionResponse>> {
+        self.client.log_message(tower_lsp::lsp_types::MessageType::LOG, "CODE ACTION").await;
         let uri = &params.text_document.uri;
         let working_doc_ref = match __self.document_map.get(&uri) {
             Some(c) => {c},
@@ -300,6 +304,7 @@ impl LanguageServer for Backend {
             },
         };
         let working_doc :&parse::Document = working_doc_ref.deref();
+        self.client.log_message(tower_lsp::lsp_types::MessageType::LOG, "COMPONENTS").await;
         let x = components::code_actions(&self.client, working_doc, &params).await;
         Ok(Some(x))
     }
@@ -313,9 +318,11 @@ impl LanguageServer for Backend {
 async fn main() {
     env_logger::init();
     let args: Vec<String> = env::args().collect();
-    let mut config = CONFIG.write().unwrap();
-    if let Some(c) = config::RootConfig::init_from_file(Path::new(&args[0])) {
-        *config = c;
+    {
+        let mut config = CONFIG.write().unwrap();
+        if let Some(c) = config::RootConfig::init_from_file(Path::new(&args[0])){
+            *config = c;
+        }
     }
 
     let stdin = tokio::io::stdin();
