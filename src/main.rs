@@ -2,7 +2,7 @@ mod components;
 mod word_query;
 mod semantic_token;
 mod parse;
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use dashmap::DashMap;
 use im_rc::Vector;
 use tower_lsp::jsonrpc::Result;
@@ -30,7 +30,7 @@ impl LanguageServer for Backend {
             capabilities: ServerCapabilities {
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                    TextDocumentSyncKind::INCREMENTAL,
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
@@ -135,12 +135,13 @@ impl LanguageServer for Backend {
         Ok(())
     }
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.create_document(&params.text_document.uri, &params.text_document.text);
+        self.create_document(&params.text_document.uri, params.text_document.version as isize, &params.text_document.text);
         self.client
             .log_message(MessageType::INFO, "file opened!")
             .await;
     }
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        return;
         let text = match params.text {
             Some(c) => {c},
             None => {
@@ -150,8 +151,8 @@ impl LanguageServer for Backend {
                 return;
             }
         };
-        let uri = params.text_document.uri;
-        self.create_document(&uri, &text)
+        let uri = &params.text_document.uri;
+        self.create_document(uri, 0, &text)
     }
     async fn did_close(&self, _: DidCloseTextDocumentParams) {
         self.client
@@ -159,37 +160,16 @@ impl LanguageServer for Backend {
             .await;
     }
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri;
-
-
-        /*
-        let gramar = language_tool::check_text(&params.content_changes[0].text).await;
-        self.client.publish_diagnostics(
-            uri.clone(),
-            gramar.diagnostic,
-            None,
-        .await;
-        self.create_document(&uri, &params.content_changes[0].text);
-        let working_doc_ref = match __self.document_map.get(&uri) {
+        let uri = &params.text_document.uri;
+        let mut working_doc_ref = match __self.document_map.get_mut(&uri) {
             Some(c) => {c},
             None => {return},
         };
-        let working_doc :&parse::Document = working_doc_ref.deref();
-        let gramar = language_tool_old::check_text(&working_doc, &params.content_changes[0].text).await;
-        self.client.publish_diagnostics(
-            uri.clone(),
-            gramar.1,
-            None,
-        ).await;
-        return;
-        let lt_gramar = language_tool::run_diagnostic(working_doc, &working_doc.text_chunks).await.unwrap();
-        self.client.publish_diagnostics(
-            uri.clone(),
-            lt_gramar.1,
-            None,
-        ).await;
-        */
-
+        let working_doc :&mut parse::Document =  working_doc_ref.deref_mut();
+        for change in params.content_changes {
+            working_doc.change(params.text_document.version, &change);
+        }
+        components::send_diagnostics(&self.client, working_doc, &uri).await;
     }
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
 

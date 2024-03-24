@@ -1,4 +1,4 @@
-use std::{char, usize};
+use std::{char, collections::{BTreeMap, HashMap}, usize};
 use dashmap::DashMap;
 use tower_lsp::{lsp_types::{Position, Url}, Client};
 use typst_syntax::Source;
@@ -14,16 +14,26 @@ pub struct Document {
     pub text_chunks: Vec<Range<usize>>,
     pub diagnostics: Vec<crate::components::Diagnostic>,
     pub diagnostics_lsp: Vec<tower_lsp::lsp_types::Diagnostic>,
+    //the source changes made, usefull for making the ranges stored up-to-date. The key is the
+    //version of the document.
+    pub source_change: BTreeMap<isize, Vec<SourceChange>>,
+    pub latest_version: isize,
+}
+pub struct SourceChange {
+    //The range of the data changed
+    range: Range<usize>,
+    //The enlargment of the data, may be negative and zero
+    delta: isize,
 }
 
 impl Backend {
-    pub fn create_document(&self, uri :&Url, text :&String) {
-        self.document_map.insert(uri.clone(), Document::new(text));
+    pub fn create_document(&self, uri :&Url, version :isize, text :&String) {
+        self.document_map.insert(uri.clone(), Document::new(version, text));
     }
 
 }
 impl Document {
-    pub fn new(in_str :&String) -> Self {
+    pub fn new(version :isize, in_str :&String) -> Self {
         let typst_source = Source::detached(in_str);
         let typst_root_node  = typst_source.root();
         let dirty_ranges = parse_recursive(&typst_source, in_str, typst_root_node);
@@ -33,7 +43,44 @@ impl Document {
             text_chunks: clean_ranges,
             diagnostics_lsp: vec!{},
             diagnostics: vec!{},
+            source_change: BTreeMap::new(),
+            latest_version: version,
         }
+    }
+    pub fn change(&mut self, version :i32, change :&tower_lsp::lsp_types::TextDocumentContentChangeEvent) {
+        self.latest_version = version as isize;
+        let range = self.lsp_range_to_byte_range(&change.range.unwrap()).unwrap();
+        self.typst_source.edit(range.clone(), &change.text);
+        self.source_change
+            .entry(version as isize)
+            .or_insert(Vec::new()).push(SourceChange {
+                range: range.clone(),
+                delta: change.text.len() as isize - (range.end as isize - range.start as isize)
+            });
+    }
+    // Corrects an old range to the changes, returns none if the range is out-of-bounds or changes
+    // been made ower it
+    pub fn correct_range(&self, version :isize, mut range :Range<usize>) -> Option<Range<usize>> {
+        let valid_changes :Vec<&Vec<SourceChange>> = self.source_change 
+            .range(version+1..)
+            .map(|c| c.1)
+            .collect();
+        for some_changes in valid_changes {
+            for change in some_changes {
+                if change.range.end > self.typst_source.len_bytes() {
+                    return None;
+                }
+                if change.range.start < range.end && range.start < change.range.end {
+                    return None;
+                }
+                if range.start < change.range.start {
+                    continue
+                }
+                range.start = (range.start as isize + change.delta) as usize;
+                range.end = (range.end as isize + change.delta) as usize;
+            }
+        }
+        Some(range)
     }
     //Return (line, character) or none if outside of source
     pub fn range_to_line_character(&self, r :usize) -> Option<(usize, usize)> {

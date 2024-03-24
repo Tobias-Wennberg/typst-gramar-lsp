@@ -101,17 +101,14 @@ pub async fn code_action_resolve(
 
 }
 pub fn get_lsp_diagnostics(document :&crate::parse::Document) -> Vec<tower_lsp::lsp_types::Diagnostic> {
-    let vals: Vec<tower_lsp::lsp_types::Diagnostic> = DIAGNOSTICS
-        .lock().unwrap()
-        .iter()
-        .filter_map(|x| {
-            if let Some(c) = x.corrected_diagnostics_lsp(&document) {
-            Some(c)
-            } else {
-            None
-            }
-        })
-    .collect();
+
+    let vals :Vec<tower_lsp::lsp_types::Diagnostic> = DIAGNOSTICS.lock().unwrap()
+        .iter().map(|x| match x.corrected_diagnostics_lsp(&document) {
+            Some(c) => c,
+            None => x.diagnostics_lsp.clone()
+        }
+
+                    ).collect();
     vals
 }
 pub fn remove_lsp_diagnostics_of_type(typ :DiagnosticSource) {

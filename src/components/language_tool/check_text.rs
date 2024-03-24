@@ -28,7 +28,7 @@ pub async fn check(
     document :&parse::Document,
     ) -> (Vec<Diagnostic>, Vec<tower_lsp::lsp_types::Diagnostic>) {
     let typst_text :String = document.typst_source.text().to_string();
-	let client = ServerClient::new("http://127.0.0.1", "8081");
+	let client = ServerClient::new("http://127.0.0.1", "8082");
     let typst_nodes = typst_syntax::parse(&typst_text);
     let converted_nodes = convert(&typst_nodes, &Rules::new(), 10000);
 
@@ -40,10 +40,13 @@ pub async fn check(
 			.with_language("auto".to_string())
 			.with_data(Data::from_iter(items.0));
 
-		let response = &mut client.check(&req).await.unwrap();
-        filter_response(response, &Default::default());
+		let mut response = match client.check(&req).await {
+		    Ok(c) => {c},
+		    Err(_) => {continue;},
+		};
+        filter_response(&mut response, &Default::default());
 
-        let mut out_pulls = add_chunk(document, &mut position, response, items.1);
+        let mut out_pulls = add_chunk(document, &mut position, &response, items.1);
         out.0.append(&mut out_pulls.0);
         out.1.append(&mut out_pulls.1);
 	}
@@ -100,6 +103,7 @@ fn add_chunk(
         out.0.push(
             Diagnostic {
                 range: typst_range,
+                version: document.latest_version,
                 diagnostics_lsp: towe_lsp_val.clone(),
                 source_data: components::DiagnosticSourceData::LanguageTool(LTDiagnostic {
                     replacements: info.replacements.clone(),

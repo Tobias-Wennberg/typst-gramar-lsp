@@ -50,26 +50,36 @@ pub async fn check(document :&crate::parse::Document) -> Vec<Diagnostic> {
     check_text::check(document).await.0
 }
 pub async fn code_action_check_text(backend :&crate::Backend, values :&LTCodeActionCheckText)
-    -> Vec<Diagnostic> {
+    -> Option<(Url, Vec<Diagnostic>)> {
     let working_doc_ref = match backend.document_map.get(&values.uri.clone()) {
         Some(c) => {c},
-        None => {return vec![]}
+        None => {return None}
     };
-    let working_doc = working_doc_ref.deref();
-    let checks = check(working_doc).await;
-    checks
+    let working_doc = working_doc_ref.deref().to_owned();
+    backend.client.show_message(tower_lsp::lsp_types::MessageType::LOG, "Laddar med language tools".to_string()).await;
+    let checks = check(&working_doc).await;
+    Some((values.uri.clone(), checks))
 }
 pub async fn code_actions(client :&tower_lsp::Client, document :&crate::parse::Document, uri :Url, range :&Range<usize>) 
     -> (Vec<tower_lsp::lsp_types::CodeActionOrCommand>, Vec<(String, crate::components::CodeActionSource)> ) {
     let hovering_error :Vec<crate::components::Diagnostic> =  crate::components::DIAGNOSTICS
         .lock().unwrap()
         .iter()
-        .filter( |x| 
-            x.source == crate::components::DiagnosticSource::LanguageTool
-            && x.range.end >= range.end
-            && x.range.start <= range.start
-            )
-        .map(|x| x.clone()).collect();
+        .filter_map( |x| {
+            let x_range = match document.correct_range(x.version.clone(), x.range.clone()) {
+                Some(c) => c,
+                None => return None,
+            };
+            if x.source == crate::components::DiagnosticSource::LanguageTool
+                && x_range.end >= range.end
+                && x_range.start <= range.start
+            {
+                Some(x.clone()) // Assuming you want to include the diagnostic itself
+            } else {
+                None
+            }
+        })
+        .collect();
     client.log_message(MessageType::INFO, format!("Hovering error length: {}", hovering_error.len())).await;
     client.log_message(MessageType::INFO, format!("Range: start: {}, stop: {}", range.start, range.end)).await;
     
@@ -108,18 +118,23 @@ pub async fn code_actions(client :&tower_lsp::Client, document :&crate::parse::D
     }
     (tower_lsp_diagnostics, component_diagnostic)
 }
-fn diagnostic_code_action(document :&crate::parse::Document, diagnostic :&crate::components::Diagnostic, uri :&Url) -> Vec<tower_lsp::lsp_types::CodeActionOrCommand> {
+fn diagnostic_code_action(document :&crate::parse::Document, diagnostic :&crate::components::Diagnostic, uri :&Url) 
+    -> Vec<tower_lsp::lsp_types::CodeActionOrCommand> {
     let lt_dia :LTDiagnostic = match &diagnostic.source_data {
         super::DiagnosticSourceData::LanguageTool(c) => c.clone(),
-        DefaultGuard => {return Vec::new()}
+        _ => {return Vec::new()}
     };
-    let mut return_var :(Vec<tower_lsp::lsp_types::CodeActionOrCommand>, Vec<(String, crate::components::CodeActionSource)>) = (Vec::new(), Vec::new());
-    let lsp_range = match document.byte_range_to_lsp_range(&diagnostic.range) {
+    let mut return_var :Vec<tower_lsp::lsp_types::CodeActionOrCommand> = Vec::new();
+    let corrected_range = match document.correct_range(diagnostic.version, diagnostic.range.clone()) {
+        Some(c) => {c},
+        None => {return Vec::new();},
+    };
+    let lsp_range = match document.byte_range_to_lsp_range(&corrected_range) {
         Some(c)  => {c},
         None => {return Vec::new();}
     };
     let lsp_diagnostics :Vec<tower_lsp::lsp_types::Diagnostic> = vec![
-        diagnostic.diagnostics_lsp.clone()
+        diagnostic.corrected_diagnostics_lsp(&document).unwrap()
     ];
     for lt_replacement in lt_dia.replacements {
         let mut replacement :HashMap<tower_lsp::lsp_types::Url, Vec<TextEdit>> = HashMap::new();
@@ -130,7 +145,7 @@ fn diagnostic_code_action(document :&crate::parse::Document, diagnostic :&crate:
             }
         ]);
 
-        return_var.0.push(
+        return_var.push(
             tower_lsp::lsp_types::CodeActionOrCommand::CodeAction(tower_lsp::lsp_types::CodeAction {
                 title: format!("Rule: {} | Replacement: {}", lt_dia.rule.description.clone(), lt_replacement.value.clone()).to_string(),
                 kind: None,
@@ -148,6 +163,6 @@ fn diagnostic_code_action(document :&crate::parse::Document, diagnostic :&crate:
         );
 
     }
-    return_var.0
+    return_var
 
 }
